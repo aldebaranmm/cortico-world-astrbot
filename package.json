@@ -4,7 +4,7 @@
   "version": "0.9.4",
   "type": "module",
   "description": "Cortico World: links Coopanion to AstrBot — bind this machine with a pairing code, recall what AstrBot remembers about the person, and turn AstrBot's proactive lines into the pet's bubbles.",
-  "license": "AGPL-3.0-or-later",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "keywords": [
     "cortico-world",
     "cortico",
