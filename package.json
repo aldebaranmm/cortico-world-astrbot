@@ -1,0 +1,27 @@
+{
+  "name": "cortico-world-astrbot",
+  "author": "Kaiser",
+  "version": "0.9.4",
+  "type": "module",
+  "description": "Cortico World: links Coopanion to AstrBot — bind this machine with a pairing code, recall what AstrBot remembers about the person, and turn AstrBot's proactive lines into the pet's bubbles.",
+  "license": "AGPL-3.0-or-later",
+  "keywords": [
+    "cortico-world",
+    "cortico",
+    "astrbot",
+    "memory",
+    "bridge"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "cortico": {
+    "kind": "world",
+    "api": 6,
+    "webUiClient": "dist/webui.js"
+  }
+}
