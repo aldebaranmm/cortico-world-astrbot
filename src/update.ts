@@ -1,4 +1,4 @@
-/** 自动更新：从阿里云 VPS 拉版本号对比，下载 zip，触发覆盖重启。
+/** 自动更新：从配置里的更新源拉版本号对比，下载 zip，触发覆盖重启。
  *
  * 所有网络/文件操作都失败兜底、绝不抛——更新是加分项，不能拖垮桌宠主流程。
  * 覆盖与重启不由本进程做（不能覆盖自己正在跑的代码），交给独立的
@@ -7,7 +7,8 @@
 import { spawn } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { createWriteStream, mkdirSync, readFileSync } from 'node:fs';
-import { request as httpRequest } from 'node:http';
+import { request as httpRequest, type ClientRequest, type IncomingMessage } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { tmpdir } from 'node:os';
 
 const ZIP_FILE = 'cortico-world-astrbot-latest.zip';
@@ -48,6 +49,8 @@ export interface UpdateStatus {
   current: string;
   latest: string;
   note: string;
+  /** 实际要下载的 zip 地址；version.json 里给了绝对地址就用它，否则回退到 `<base>/<ZIP_FILE>`。 */
+  zip: string;
 }
 
 /** 读本地扩展版本（package.json 的 version 字段）。 */
@@ -65,14 +68,64 @@ export function coopRootOf(packageDir: string): string {
   return resolve(packageDir, '../../../..');
 }
 
-/** HTTP GET 返回 JSON 文本；失败/超时返回空串。 */
-function httpText(url: string, timeoutMs = 15000): Promise<string> {
+/** 按协议挑 http / https 模块；地址非法或协议不支持返回 null（绝不抛）。 */
+function requestFor(url: string): typeof httpRequest | null {
+  try {
+    const { protocol } = new URL(url);
+    if (protocol === 'https:') return httpsRequest as unknown as typeof httpRequest;
+    if (protocol === 'http:') return httpRequest;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 发起 GET 并把回调包在 try 里 —— 协议不对、URL 残缺都只会让这次请求失败，
+ * 不会变成未捕获异常。（之前用 node:http 硬发 https 地址就会同步抛。）
+ */
+function startRequest(url: string, onResponse: (res: IncomingMessage) => void): ClientRequest | null {
+  const fn = requestFor(url);
+  if (!fn) return null;
+  try {
+    return fn(url, { method: 'GET' }, onResponse);
+  } catch {
+    return null;
+  }
+}
+
+/** http→https 的站点很常见，3xx 要自己跟，最多 3 跳。 */
+function redirectOf(from: string, res: IncomingMessage): string {
+  const status = res.statusCode ?? 0;
+  if (status < 300 || status >= 400) return '';
+  const raw = res.headers.location;
+  const loc = Array.isArray(raw) ? raw[0] : raw;
+  if (!loc) return '';
+  try {
+    return new URL(loc, from).toString();
+  } catch {
+    return '';
+  }
+}
+
+/** HTTP(S) GET 返回文本；失败/超时/协议不支持都返回空串。 */
+function httpText(url: string, timeoutMs = 15000, hop = 0): Promise<string> {
   return new Promise((resolve) => {
-    const req = httpRequest(url, { method: 'GET' }, (res) => {
+    const req = startRequest(url, (res) => {
+      const next = hop < 3 ? redirectOf(url, res) : '';
+      if (next) {
+        res.resume();
+        resolve(httpText(next, timeoutMs, hop + 1));
+        return;
+      }
       const chunks: Buffer[] = [];
       res.on('data', (c: Buffer) => chunks.push(c));
       res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
     });
+    if (!req) {
+      resolve('');
+      return;
+    }
     req.setTimeout(timeoutMs, () => req.destroy());
     req.on('error', () => resolve(''));
     req.end();
@@ -84,15 +137,20 @@ export async function checkUpdate(packageDir: string, updateUrl = ''): Promise<U
   const current = currentVersion(packageDir);
   const base = normalizeBase(updateUrl);
   if (!base) {
-    return { hasUpdate: false, current, latest: '', note: '未配置更新地址，跳过检查' };
+    return { hasUpdate: false, current, latest: '', note: '未配置更新地址，跳过检查', zip: '' };
   }
   const raw = await httpText(`${base}/version.json`);
   let latest = '';
   let note = '';
+  // 只有 http(s) 的 base 才拼得出可下载的地址；其它情况留空，别把废地址传下去
+  let zip = /^https?:\/\//i.test(base) ? `${base}/${ZIP_FILE}` : '';
   try {
     const info = JSON.parse(raw) as Record<string, unknown>;
     latest = String(info.version ?? '');
     note = String(info.note ?? '');
+    // version.json 里允许直接给 zip 的绝对地址（把包放 GitHub Releases、只在静态站放一个 json 的用法）
+    const abs = String(info.zip ?? '').trim();
+    if (/^https?:\/\//i.test(abs)) zip = abs;
   } catch {
     /* 版本号解析失败就当作没更新 */
   }
@@ -102,21 +160,20 @@ export async function checkUpdate(packageDir: string, updateUrl = ''): Promise<U
     current,
     latest,
     note,
+    zip,
   };
 }
 
-/** 下载最新 zip 到临时目录，返回本地路径；失败返回空串。 */
-export function downloadUpdate(updateUrl = ''): Promise<string> {
-  const base = normalizeBase(updateUrl);
-  if (!base) return Promise.resolve('');
-  const dest = join(tmpdir(), 'cortico-update', 'latest.zip');
+/** 把 url 下载到 dest；3xx 自己跟（最多 3 跳），失败返回空串。 */
+function downloadFrom(url: string, dest: string, hop = 0): Promise<string> {
   return new Promise((resolve) => {
-    try {
-      mkdirSync(join(dest, '..'), { recursive: true });
-    } catch {
-      /* 目录建不起来就失败 */
-    }
-    const req = httpRequest(`${base}/${ZIP_FILE}`, { method: 'GET' }, (res) => {
+    const req = startRequest(url, (res) => {
+      const next = hop < 3 ? redirectOf(url, res) : '';
+      if (next) {
+        res.resume();
+        resolve(downloadFrom(next, dest, hop + 1));
+        return;
+      }
       if ((res.statusCode ?? 0) >= 300) {
         res.resume();
         resolve('');
@@ -127,10 +184,28 @@ export function downloadUpdate(updateUrl = ''): Promise<string> {
       ws.on('finish', () => resolve(dest));
       ws.on('error', () => resolve(''));
     });
+    if (!req) {
+      resolve('');
+      return;
+    }
     req.setTimeout(180000, () => req.destroy());
     req.on('error', () => resolve(''));
     req.end();
   });
+}
+
+/** 下载最新 zip 到临时目录，返回本地路径；失败返回空串。 */
+export function downloadUpdate(updateUrl = '', zipUrl = ''): Promise<string> {
+  const base = normalizeBase(updateUrl);
+  const target = zipUrl || (base ? `${base}/${ZIP_FILE}` : '');
+  if (!target) return Promise.resolve('');
+  const dir = join(tmpdir(), 'cortico-update');
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch {
+    return Promise.resolve('');
+  }
+  return downloadFrom(target, join(dir, 'latest.zip'));
 }
 
 /** 触发独立的覆盖重启脚本（detached），返回是否成功拉起。 */
