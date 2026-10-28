@@ -5,8 +5,8 @@
  * `scripts/apply-update.ps1`（detached）在 Coopanion 退出后完成。
  */
 import { spawn } from 'node:child_process';
-import { join, resolve } from 'node:path';
-import { createWriteStream, mkdirSync, readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { createWriteStream, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { request as httpRequest, type ClientRequest, type IncomingMessage } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { tmpdir } from 'node:os';
@@ -213,17 +213,34 @@ export function applyUpdate(zipPath: string, packageDir: string, log?: (m: strin
   const ps1 = join(packageDir, 'scripts', 'apply-update.ps1');
   const extDir = packageDir;
   const coopRoot = coopRootOf(packageDir);
+  const workDir = dirname(zipPath);
+  const logPath = join(workDir, 'apply-update.log');
+  const psExe = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+
+  // 关键：不能再直接 spawn powershell。
+  // 从 Electron 里 detached 出来的子进程仍挂在宿主的 Job 对象上，宿主一退它就被回收——
+  // 实测「已触发更新脚本」打完日志后什么都没发生（Coopanion 进程号都没变）。
+  // 改成写一个 .cmd，交给 explorer.exe 用 shell 打开：新进程的爹是资源管理器，不是我们。
+  const runner = join(workDir, 'apply-update.cmd');
+  const body = [
+    '@echo off',
+    'chcp 65001 >nul',
+    `echo [%date% %time%] start >> "${logPath}"`,
+    `"${psExe}" -NoProfile -ExecutionPolicy Bypass -File "${ps1}" -ZipPath "${zipPath}" -ExtDir "${extDir}" -CoopRoot "${coopRoot}" >> "${logPath}" 2>&1`,
+    `echo [%date% %time%] exit=%errorlevel% >> "${logPath}"`,
+  ].join('\r\n');
+
   try {
-    const child = spawn(
-      'powershell.exe',
-      [
-        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1,
-        '-ZipPath', zipPath, '-ExtDir', extDir, '-CoopRoot', coopRoot,
-      ],
-      { detached: true, stdio: 'ignore', windowsHide: true },
-    );
+    writeFileSync(runner, body, 'utf8');
+  } catch (err) {
+    log?.(`写更新脚本失败：${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+
+  try {
+    const child = spawn('explorer.exe', [runner], { detached: true, stdio: 'ignore', windowsHide: true });
     child.unref();
-    log?.(`已触发更新脚本：${zipPath}`);
+    log?.(`已触发更新脚本：${runner}（日志 ${logPath}）`);
     return true;
   } catch (err) {
     log?.(`触发更新脚本失败：${err instanceof Error ? err.message : String(err)}`);
