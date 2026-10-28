@@ -144,7 +144,7 @@ export function astrbotConfigGroup(): ConfigGroup {
           type: 'string',
           title: '扩展更新地址',
           description:
-            '扩展自动更新去哪儿拉新版本。留空（默认）＝这台机器不检查更新，自己发新包手动装就行。想开自动更新就填你自己的更新服务器，例如 http://<你的服务器地址或域名>:8080。安装包里不含任何真实地址。',
+            '扩展自动更新去哪儿拉新版本。留空（默认）＝这台机器不检查更新，自己发新包手动装就行。想开自动更新就填你自己的更新服务器，http:// 和 https:// 都支持（GitHub Pages 这类静态托管也能用），例如 https://<你的用户名>.github.io/cortico-world-astrbot。安装包里不含任何真实地址。',
         },
         'worlds.astrbot.wakeMode': {
           type: 'string',
