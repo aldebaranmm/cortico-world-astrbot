@@ -1,7 +1,7 @@
 {
   "name": "cortico-world-astrbot",
-  "version": "0.9.5",
-  "note": "自动更新支持 https、跟随跳转",
+  "version": "0.9.6",
+  "note": "虚空版本：代码没改，只提版本号，用来验证自动更新",
   "zip": "https://aldebaranmm.github.io/cortico-world-astrbot/cortico-world-astrbot-latest.zip",
-  "updatedAt": "2026-10-29T01:15:00+08:00"
+  "updatedAt": "2026-10-29T01:36:00+08:00"
 }
