@@ -23,5 +23,9 @@
     "kind": "world",
     "api": 6,
     "webUiClient": "dist/webui.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aldebaranmm/cortico-world-astrbot.git"
   }
 }
