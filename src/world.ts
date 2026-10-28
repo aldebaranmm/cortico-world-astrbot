@@ -925,7 +925,7 @@ export class AstrbotWorld implements World {
 
   private startUpdateCheck(): void {
     // 先同步填上当前版本，让控制台徽章立刻能显示
-    this.updateStatus = { hasUpdate: false, current: currentVersion(this.opts.packageDir), latest: '', note: '' };
+    this.updateStatus = { hasUpdate: false, current: currentVersion(this.opts.packageDir), latest: '', note: '', zip: '' };
     void this.tickUpdateCheck();
     this.updateTimer = setInterval(() => void this.tickUpdateCheck(), AstrbotWorld.UPDATE_CHECK_MS);
     this.updateTimer.unref?.();
@@ -994,7 +994,7 @@ export class AstrbotWorld implements World {
   /** 下载 zip 并触发独立的覆盖重启脚本。 */
   private async performUpdate(): Promise<void> {
     this.opts.log?.('主人同意更新，开始下载');
-    const zip = await downloadUpdate(this.cfg.updateUrl);
+    const zip = await downloadUpdate(this.cfg.updateUrl, this.updateStatus?.zip ?? '');
     if (!zip) {
       this.opts.log?.('更新下载失败');
       return;
