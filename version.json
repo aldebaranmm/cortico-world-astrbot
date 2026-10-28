@@ -1,7 +1,7 @@
 {
   "name": "cortico-world-astrbot",
-  "version": "0.9.7",
-  "note": "修好了：点气泡里的「好」也能触发更新，更新脚本不再被宿主回收",
+  "version": "0.9.8",
+  "note": "测试版：验证「点按钮也能更新 + 自动重启」",
   "zip": "https://aldebaranmm.github.io/cortico-world-astrbot/cortico-world-astrbot-latest.zip",
-  "updatedAt": "2026-10-29T01:52:00+08:00"
+  "updatedAt": "2026-10-29T01:56:00+08:00"
 }
