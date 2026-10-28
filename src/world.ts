@@ -92,6 +92,16 @@ const CONSENT_DENY = /(不同意|不行|不要|不用|不想|算了|先不|别�
 /** 主人在刷视频时说的停止话，立即停掉脚本。 */
 const STOP_VIDEO_WORDS = /(别刷|不刷|不要刷|停止|停下|停|关掉|够了|别看了|别玩了|别弄了)/i;
 
+/**
+ * 从选择题回答里取出主人选的项。
+ * 事件长这样：`…主人回答「要不要更新？」:选了第 1 项「好」` —— 取最后一个「…」。
+ */
+function lastQuoted(text: string): string {
+  const all = String(text).match(/「([^」]{1,40})」/g);
+  if (!all || all.length === 0) return '';
+  return all[all.length - 1].slice(1, -1).trim();
+}
+
 /** 一轮待回传的对话：主人说的那句话 + 桌宠随后说的话。 */
 interface PendingChat {
   user: string;
@@ -499,10 +509,15 @@ export class AstrbotWorld implements World {
       const events = host.store.range({ fromCursor: Math.max(0, cursor - 60), limit: 60 });
       for (let index = events.length - 1; index >= 0; index -= 1) {
         const event = events[index];
-        if (event.type !== 'desktop-pet.message') continue;
+        const isMessage = event.type === 'desktop-pet.message';
+        const isAnswer = event.type === 'desktop-pet.answer';
+        if (!isMessage && !isAnswer) continue;
         const fromMeta =
           typeof event.meta?.text === 'string' ? String(event.meta.text).trim() : '';
-        const text = fromMeta || this.stripSpeaker(String(event.text ?? ''));
+        // 选择题回答取主人选的那一项，别把「选了第 1 项」整句当原话
+        const text = isAnswer
+          ? lastQuoted(fromMeta || String(event.text ?? ''))
+          : fromMeta || this.stripSpeaker(String(event.text ?? ''));
         if (!text) continue;
         this.lastUserText = text;
         // 用事件自己的时间戳，别用「现在」：否则询问之前说的旧话会被误判成「刚回复」，
@@ -1292,6 +1307,17 @@ export class AstrbotWorld implements World {
   private consumeChatEvent(event: EventEnvelope, outgoing: ChatItem[]): void {
     const text = (event.text ?? '').trim();
     if (!text) return;
+
+    // 选择题回答（桌宠用 ask 弹出的卡片）：也算主人发言。
+    // 少了这条，「点按钮同意更新」永远传不到这里，桌宠以为答应了、扩展却不知情。
+    if (event.type === 'desktop-pet.answer') {
+      const pick = lastQuoted(text);
+      if (pick) {
+        this.lastUserText = pick;
+        this.lastUserAt = Date.now();
+      }
+      return;
+    }
 
     if (event.type === 'desktop-pet.message') {
       // 新的一轮开始，先把上一轮结账
